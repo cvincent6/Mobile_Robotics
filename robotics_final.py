@@ -60,7 +60,8 @@ class GoToPose():
         self.ang = {0:0,001:-1.2,10:-1.2,11:-1.2,100:1.5,101:1.0,110:1.0,111:1.2}
         self.fwd = {0:.25,1:0,10:0,11:0,100:0.1,101:0,110:0,111:0}
         self.dbgmsg = {0:'Move forward',1:'Veer right',10:'Veer right',11:'Veer right',100:'Veer left',101:'Veer left',110:'Veer left',111:'Veer right'}
-
+        self.current_pos=None
+        self.current_quat=None
         self.goal_sent = False
         self.node_matrix=node
         self.velocity_publisher = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=10)
@@ -245,6 +246,9 @@ class GoToPose():
                     self.node_matrix[num]['pos'],self.node_matrix[num]['quat'] = self.tf.lookupTransform("/map", cf_id, self.tf.getLatestCommonTime("/map", cf_id))
 
                     rospy.loginfo("Found Tag" + str(num))
+            if 'base_link' in cf_id:
+                self.current_pos,self.current_quat=self.tf.lookupTransform("/map", "/base_link", self.tf.getLatestCommonTime("/map", "/base_link"))
+
 
 
     def goto(self, pos, quat):
@@ -324,14 +328,15 @@ if __name__ == '__main__':
 
                 rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
                 success = navigator.goto(position, quaternion)
-
+                threshold=.2
                 if success:
                     rospy.loginfo("Hooray, reached %s",current_goal)
                     navigator.makeNoise()
                     ##navigator.twist()
                 else:
                     rospy.loginfo("The base failed to reach the desired pose")
-
+                    if abs(navigator.current_pos[0]-tagx)<threshold and abs(navigator.current_pos[0]-tagx)<threshold :
+                        navigator.makeNoise()
                 current_goal = current_goal + 1
 
         rospy.loginfo("Program complete")
