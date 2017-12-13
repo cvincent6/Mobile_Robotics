@@ -7,7 +7,6 @@ Colin Vincent
 
 roslaunch turtlebot_bringup minimal.launch
 roslaunch turtlebot_navigation gmapping_demo.launch
-roslaunch turtlebot_bringup 3dsensor.launch
 
 ## On workstation
 
