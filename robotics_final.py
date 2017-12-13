@@ -17,7 +17,10 @@ from tf2_msgs.msg import TFMessage
 from tf import TransformListener
 from geometry_msgs.msg import Twist
 from kobuki_msgs.msg import BumperEvent
+from kobuki_msgs.msg import Sound
 
+from sensor_msgs.msg import LaserScan
+import random
 
 # global variables
 bump = -1
@@ -38,15 +41,30 @@ node=[{'navigatedTo':False,'located':False,'pos':None,'quat':None},
 
 NUM_NODES=6
 
+def random_duration():
+    # Calculates a random amount of time for the Turtlebot to turn for
+    duration = min_turn_duration + random.random() * (max_turn_duration - min_turn_duration)
+    str = "Random duration: %s"%duration
+    rospy.loginfo(str)
+    return duration
+
 class GoToPose():
     def __init__(self):
 
         self.tf = TransformListener()
+        self.wander_msg = Twist()
+        self.wander=False
+        self.sect_1 = 0
+        self.sect_2 = 0
+        self.sect_3 = 0
+        self.ang = {0:0,001:-1.2,10:-1.2,11:-1.2,100:1.5,101:1.0,110:1.0,111:1.2}
+        self.fwd = {0:.25,1:0,10:0,11:0,100:0.1,101:0,110:0,111:0}
+        self.dbgmsg = {0:'Move forward',1:'Veer right',10:'Veer right',11:'Veer right',100:'Veer left',101:'Veer left',110:'Veer left',111:'Veer right'}
 
         self.goal_sent = False
         self.node_matrix=node
         self.velocity_publisher = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=10)
-
+        self.sound_publisher = rospy.Publisher('/mobile_base/commands/sound', Sound)
         # What to do if shut down (e.g. Ctrl-C or failure)
         rospy.on_shutdown(self.shutdown)
         
@@ -56,47 +74,104 @@ class GoToPose():
 
         # Allow up to 5 seconds for the action server to come up
         self.move_base.wait_for_server(rospy.Duration(5))   
-    def random_duration():
-        # Calculates a random amount of time for the Turtlebot to turn for
-        duration = min_turn_duration + random.random() * (max_turn_duration - min_turn_duration)
-        str = "Random duration: %s"%duration
-        rospy.loginfo(str)
-        return duration
+    def makeNoise():
+        msg = Sound()
+        msg.value = Sound.ON
+        self.sound_publisher.publish(msg)
+
+    #All of the laser roaming stuff
+
+    def movement(self, sect1, sect2, sect3):
+        '''Uses the information known about the obstacles to move robot.
+
+        Parameters are class variables and are used to assign a value to
+        variable sect and then  set the appropriate angular and linear 
+        velocities, and log messages.
+        These are published and the sect variables are reset.'''
+        sect = int(str(self.sect_1) + str(self.sect_2) + str(self.sect_3))
+        rospy.loginfo("Sect = " + str(sect)) 
+        
+        self.wander_msg.angular.z = self.ang[sect]
+        self.wander_msg.linear.x = self.fwd[sect]
+        rospy.loginfo(self.dbgmsg[sect])
+        self.velocity_publisher.publish(self.wander_msg)
+
+        self.reset_sect()
+    
+    def reset_sect(self):
+        '''Resets the below variables before each new scan message is read'''
+        self.sect_1 = 0
+        self.sect_2 = 0
+        self.sect_3 = 0
+    def laserCallback(self,scanmsg):
+         '''Passes laser scan message to for_callback function of sub_obj.
+
+        Parameter scanmsg is laserscan message.'''
+        if self.wander:
+            self.sub_obj.for_callback(scanmsg)
+    def for_callback(self,laserscan):
+        '''Passes laserscan onto function sort which gives the sect 
+        variables the proper values.  Then the movement function is run 
+        with the class sect variables as parameters.
+
+        Parameter laserscan is received from callback function.'''
+        self.sort(laserscan)
+        self.movement(self.sect_1, self.sect_2, self.sect_3)
+    def sort(self, laserscan):
+        '''Goes through 'ranges' array in laserscan message and determines 
+        where obstacles are located. The class variables sect_1, sect_2, 
+        and sect_3 are updated as either '0' (no obstacles within 0.7 m)
+        or '1' (obstacles within 0.7 m)
+
+        Parameter laserscan is a laserscan message.'''
+        entries = len(laserscan.ranges)
+        for entry in range(0,entries):
+            if 0.4 < laserscan.ranges[entry] < 0.75:
+            self.sect_1 = 1 if (0 < entry < entries/3) else 0 
+            self.sect_2 = 1 if (entries/3 < entry < entries/2) else 0
+            self.sect_3 = 1 if (entries/2 < entry < entries) else 0
+        rospy.loginfo("sort complete,sect_1: " + str(self.sect_1) + " sect_2: " + str(self.sect_2) + " sect_3: " + str(self.sect_3))
+    def reset_sect(self):
+        '''Resets the below variables before each new scan message is read'''
+        self.sect_1 = 0
+        self.sect_2 = 0
+        self.sect_3 = 0
+
+    #The bumper wandering stuff
+
     def wander():
-        pub = rospy.Publisher('cmd_vel_mux/input/navi', Twist)
-        #listen
+        
         global bump
 
 
         twist = Twist()
-        while not rospy.is_shutdown():
-            if bump==0:
-                str = "right bumper, turning left %s"%rospy.get_time()
-                rospy.loginfo(str)
-                turn(pub, random_duration(), turn_speed)
-            elif bump==1:
-                str = "left bumper, turning right %s"%rospy.get_time()
-                rospy.loginfo(str)
-                turn(pub, random_duration(), -turn_speed)
-            elif bump==2:
-                str = "both bumpers, turning left %s"%rospy.get_time()
-                rospy.loginfo(str)
-                turn(pub, random_duration(), turn_speed)
-            else:
-                str = "moving straight ahead %s"%rospy.get_time()
-                #rospy.loginfo(str)
-                twist.linear.x = movement_speed; twist.linear.y = 0; twist.linear.z = 0
-                twist.angular.x = 0; twist.angular.y = 0; twist.angular.z = 0
+        if bump==0:
+            str = "right bumper, turning left %s"%rospy.get_time()
+            rospy.loginfo(str)
+            self.turn(random_duration(), turn_speed)
+        elif bump==1:
+            str = "left bumper, turning right %s"%rospy.get_time()
+            rospy.loginfo(str)
+            self.turn(random_duration(), -turn_speed)
+        elif bump==2:
+            str = "both bumpers, turning left %s"%rospy.get_time()
+            rospy.loginfo(str)
+            self.turn(random_duration(), turn_speed)
+        else:
+            str = "moving straight ahead %s"%rospy.get_time()
+            #rospy.loginfo(str)
+            twist.linear.x = movement_speed; twist.linear.y = 0; twist.linear.z = 0
+            twist.angular.x = 0; twist.angular.y = 0; twist.angular.z = 0
          bump = -1
-         pub.publish(twist)
+         self.velocity_publisher.publish(twist)
          rospy.sleep(action_duration)
-    def turn(pub, duration, weight):
+    def turn(duration, weight):
         twist = Twist()
 
         # First, back up slightly from the wall
         twist.linear.x = -movement_speed; twist.linear.y = 0; twist.linear.z = 0
         twist.angular.x = 0; twist.angular.y = 0; twist.angular.z = 0
-        pub.publish(twist)
+        self.velocity_publisher.publish(twist)
         rospy.sleep(action_duration)
 
         # Now, keep turning until the end of the specified duration
@@ -107,7 +182,7 @@ class GoToPose():
              #rospy.loginfo(str)
              twist.linear.x = 0.0; twist.linear.y = 0; twist.linear.z = 0
              twist.angular.x = 0; twist.angular.y = 0; twist.angular.z = weight
-             pub.publish(twist)
+             self.velocity_publisher.publish(twist)
              rospy.sleep(action_duration)
 
     def twist(self,deg=360):
@@ -169,7 +244,7 @@ class GoToPose():
                     self.node_matrix[num]['located'] = True
                     self.node_matrix[num]['pos'],self.node_matrix[num]['quat'] = self.tf.lookupTransform("/map", cf_id, self.tf.getLatestCommonTime("/map", cf_id))
 
-                    #rospy.loginfo("Found Tag" + str(num))
+                    rospy.loginfo("Found Tag" + str(num))
 
 
     def goto(self, pos, quat):
@@ -218,21 +293,18 @@ if __name__ == '__main__':
         navigator = GoToPose()
         rospy.Subscriber('tf',TFMessage,navigator.callback)
         rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, navigator.processSensing)
-     
+        rospy.Subscriber('/scan', LaserScan, navigator.laserCallback)
         current_goal=0
 
         while current_goal<=NUM_NODES:
 
             while not(navigator.node_matrix[current_goal]['located']):
                 #rospy.loginfo("Searching for: %s",current_goal)
-                
-                # TODO: implement ROAM
-                # ROAM
-                #navigator.twist(180)
-                #rospy.loginfo(str(navigator.node_matrix))
+                #navigator.wander()
+                navigator.wander=True
                 rospy.loginfo("Looking for " + str(current_goal))
-                rospy.sleep(5)
-
+                rospy.sleep(1)
+            navigator.wander=False
             if navigator.node_matrix[current_goal]['located']:
 
                 rospy.loginfo(str(navigator.node_matrix))
@@ -255,7 +327,8 @@ if __name__ == '__main__':
 
                 if success:
                     rospy.loginfo("Hooray, reached %s",current_goal)
-                    navigator.twist()
+                    navigator.makeNoise()
+                    ##navigator.twist()
                 else:
                     rospy.loginfo("The base failed to reach the desired pose")
 
