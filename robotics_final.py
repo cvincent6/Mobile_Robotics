@@ -103,7 +103,12 @@ class GoToPose():
 		sect = int(str(self.sect_1) + str(self.sect_2) + str(self.sect_3))
 		rospy.loginfo("Sect = " + str(sect)) 
 		
-		self.wander_msg.angular.z = self.ang[sect]
+		if sect=111:
+            if random.uniform(-1, 1)>0:
+                sign=1
+            else:
+                sign=-1
+        self.wander_msg.angular.z = sign*self.ang[sect]
 		self.wander_msg.linear.x = self.fwd[sect]
 		rospy.loginfo(self.dbgmsg[sect])
 		self.velocity_publisher.publish(self.wander_msg)
