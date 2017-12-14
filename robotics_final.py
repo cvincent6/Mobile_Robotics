@@ -346,8 +346,8 @@ if __name__ == '__main__':
 					##navigator.twist()
 				else:
 					rospy.loginfo("The base failed to reach the desired pose")
-					if abs(navigator.current_pos[0]-tagx)<threshold and abs(navigator.current_pos[0]-tagx)<threshold :
-						navigator.makeNoise()
+					#if abs(navigator.current_pos[0]-tagx)<threshold and abs(navigator.current_pos[0]-tagx)<threshold :
+					navigator.makeNoise()
 				current_goal = current_goal + 1
 
 		rospy.loginfo("Program complete")
