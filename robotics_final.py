@@ -98,17 +98,18 @@ class GoToPose():
 		Parameters are class variables and are used to assign a value to
 		variable sect and then  set the appropriate angular and linear 
 		velocities, and log messages.
-		These are published and the sect variables are reset.'''
+		These are pblished and the sect variables are reset.'''
 
 		sect = int(str(self.sect_1) + str(self.sect_2) + str(self.sect_3))
 		rospy.loginfo("Sect = " + str(sect)) 
+		sign = 1
 		
-		if sect=111:
-            if random.uniform(-1, 1)>0:
-                sign=1
-            else:
-                sign=-1
-        self.wander_msg.angular.z = sign*self.ang[sect]
+		if sect ==111:
+			if random.uniform(-1, 1)> 0:
+				sign=1
+			else:
+				sign=-1
+		self.wander_msg.angular.z = sign*self.ang[sect]
 		self.wander_msg.linear.x = self.fwd[sect]
 		rospy.loginfo(self.dbgmsg[sect])
 		self.velocity_publisher.publish(self.wander_msg)
