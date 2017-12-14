@@ -3,15 +3,17 @@
 # Chris Puglia, Team 1
 # Mobile Robotics Final Project
 
-# TurtleBot must have minimal.launch & 3d.launch & gmapping.launch
+# TurtleBot must have minimal.launch & gmapping.launch
 # running prior to starting this script
 
 import rospy
-from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+import sys
 import actionlib
+import random
+
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import *
 from geometry_msgs.msg import Pose, Point, Quaternion
-import sys
 from geometry_msgs.msg import Pose, Point, Quaternion, PoseArray, Transform
 from tf2_msgs.msg import TFMessage
 from tf import TransformListener
@@ -23,16 +25,15 @@ from math import sin,cos,degrees
 from tf.transformations import euler_from_quaternion
 
 from sensor_msgs.msg import LaserScan
-import random
 
 # global variables
 bump = -1
-
 action_duration = .5
 movement_speed = 0.3
 turn_speed = 0.6
 min_turn_duration = 3.5
 max_turn_duration = 5
+NUM_NODES=6
 
 #default for blank node
 node=[{'navigatedTo':False,'located':False,'pos':None,'quat':None},
@@ -42,17 +43,19 @@ node=[{'navigatedTo':False,'located':False,'pos':None,'quat':None},
 	{'navigatedTo':False,'located':False,'pos':None,'quat':None},
 	{'navigatedTo':False,'located':False,'pos':None,'quat':None}]
 
-NUM_NODES=6
-
 def random_duration():
+
 	# Calculates a random amount of time for the Turtlebot to turn for
 	duration = min_turn_duration + random.random() * (max_turn_duration - min_turn_duration)
 	str = "Random duration: %s"%duration
 	rospy.loginfo(str)
+
 	return duration
 
 class GoToPose():
+
 	def __init__(self):
+
 		self.offset = .4
 		self.tf = TransformListener()
 		self.wander_msg = Twist()
@@ -69,6 +72,7 @@ class GoToPose():
 		self.node_matrix=node
 		self.velocity_publisher = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=10)
 		self.sound_publisher = rospy.Publisher('/mobile_base/commands/sound', Sound, queue_size=10)
+
 		# What to do if shut down (e.g. Ctrl-C or failure)
 		rospy.on_shutdown(self.shutdown)
 		
@@ -79,20 +83,23 @@ class GoToPose():
 		# Allow up to 5 seconds for the action server to come up
 		self.move_base.wait_for_server(rospy.Duration(5))   
 
+	#Beep turtlebot
 	def makeNoise(self):
+
 		msg = Sound()
 		msg.value = Sound.ON
 		self.sound_publisher.publish(msg)
 
 	#All of the laser roaming stuff
-
 	def movement(self, sect1, sect2, sect3):
+
 		'''Uses the information known about the obstacles to move robot.
 
 		Parameters are class variables and are used to assign a value to
 		variable sect and then  set the appropriate angular and linear 
 		velocities, and log messages.
 		These are published and the sect variables are reset.'''
+
 		sect = int(str(self.sect_1) + str(self.sect_2) + str(self.sect_3))
 		rospy.loginfo("Sect = " + str(sect)) 
 		
@@ -104,17 +111,20 @@ class GoToPose():
 		self.reset_sect()
 	
 	def reset_sect(self):
+
 		'''Resets the below variables before each new scan message is read'''
 		self.sect_1 = 0
 		self.sect_2 = 0
 		self.sect_3 = 0
 
 	def laserCallback(self,scanmsg):
+
 		 ##Passes laser scan message to for_callback function of sub_obj.
 		if self.wander:
 			self.for_callback(scanmsg)
 
 	def for_callback(self,laserscan):
+
 		'''Passes laserscan onto function sort which gives the sect 
 		variables the proper values.  Then the movement function is run 
 		with the class sect variables as parameters.
@@ -122,6 +132,8 @@ class GoToPose():
 		Parameter laserscan is received from callback function.'''
 		self.sort(laserscan)
 		self.movement(self.sect_1, self.sect_2, self.sect_3)
+
+
 	def sort(self, laserscan):
 		'''Goes through 'ranges' array in laserscan message and determines 
 		where obstacles are located. The class variables sect_1, sect_2, 
@@ -129,6 +141,7 @@ class GoToPose():
 		or '1' (obstacles within 0.7 m)
 
 		Parameter laserscan is a laserscan message.'''
+
 		entries = len(laserscan.ranges)
 		for entry in range(0,entries):
 			if 0.4 < laserscan.ranges[entry] < 0.75:
@@ -136,6 +149,7 @@ class GoToPose():
 				self.sect_2 = 1 if (entries/3 < entry < entries/2) else 0
 				self.sect_3 = 1 if (entries/2 < entry < entries) else 0
 		rospy.loginfo("sort complete,sect_1: " + str(self.sect_1) + " sect_2: " + str(self.sect_2) + " sect_3: " + str(self.sect_3))
+
 	def reset_sect(self):
 		'''Resets the below variables before each new scan message is read'''
 		self.sect_1 = 0
@@ -143,11 +157,9 @@ class GoToPose():
 		self.sect_3 = 0
 
 	#The bumper wandering stuff
-
 	def wander():
 		
 		global bump
-
 
 		twist = Twist()
 		if bump==0:
@@ -170,7 +182,9 @@ class GoToPose():
 		bump = -1
 		self.velocity_publisher.publish(twist)
 		rospy.sleep(action_duration)
+
 	def turn(duration, weight):
+
 		twist = Twist()
 
 		# First, back up slightly from the wall
@@ -230,6 +244,7 @@ class GoToPose():
 		self.velocity_publisher.publish(vel_msg)
 		rospy.loginfo("Done Rotating")
 
+	#Callback for tf subscriber -- updates tag information
 	def callback(self,data):
 
 		val = data.transforms
@@ -259,8 +274,6 @@ class GoToPose():
 			if 'base_footprint' in cf_id:
 				self.current_pos,self.current_quat=self.tf.lookupTransform("/map", "/base_link", self.tf.getLatestCommonTime("/map", "/base_link"))
 
-
-
 	def goto(self, pos, quat):
 
 		# Send a goal
@@ -288,6 +301,7 @@ class GoToPose():
 
 		self.goal_sent = False
 		return result
+
 	# listen (adapted from line_follower
 	def processSensing(BumperEvent):
 		 global bump
@@ -302,6 +316,7 @@ class GoToPose():
 		rospy.sleep(1)
 
 if __name__ == '__main__':
+
 	try:
 		rospy.init_node('nav_test', anonymous=False)
 		navigator = GoToPose()
@@ -313,6 +328,7 @@ if __name__ == '__main__':
 		while current_goal<=NUM_NODES:
 
 			while not(navigator.node_matrix[current_goal]['located']):
+
 				#rospy.loginfo("Searching for: %s",current_goal)
 				#navigator.wander()
 				navigator.wander=True
@@ -320,6 +336,7 @@ if __name__ == '__main__':
 				rospy.sleep(1)
 				
 			navigator.wander=False
+
 			if navigator.node_matrix[current_goal]['located']:
 
 				rospy.loginfo(str(navigator.node_matrix))
@@ -340,6 +357,7 @@ if __name__ == '__main__':
 				rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
 				success = navigator.goto(position, quaternion)
 				threshold=.2
+
 				if success:
 					rospy.loginfo("Hooray, reached %s",current_goal)
 					navigator.makeNoise()
@@ -348,6 +366,7 @@ if __name__ == '__main__':
 					rospy.loginfo("The base failed to reach the desired pose")
 					#if abs(navigator.current_pos[0]-tagx)<threshold and abs(navigator.current_pos[0]-tagx)<threshold :
 					navigator.makeNoise()
+
 				current_goal = current_goal + 1
 
 		rospy.loginfo("Program complete")
